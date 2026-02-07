@@ -257,25 +257,116 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
         
     return df_final
 
+def check_excel_format(file_bytes):
+    """
+    Check if file is valid Excel format by checking magic bytes
+    Returns: ('xlsx', 'xls', 'unknown')
+    """
+    if not file_bytes or len(file_bytes) < 8:
+        return 'unknown'
+    
+    # Check for XLSX format (ZIP file signature)
+    if file_bytes[:4] == b'PK\x03\x04':
+        return 'xlsx'
+    
+    # Check for XLS format (OLE2 signature)
+    if file_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+        return 'xls'
+    
+    return 'unknown'
+
 @st.cache_data
 def load_cis_file(file_bytes):
     """Load and cache CIS file - supports both xlsx and xls formats"""
-    try:
-        # Try openpyxl for .xlsx files first
-        return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
-    except Exception as e:
+    file_size = len(file_bytes) if file_bytes else 0
+    file_format = check_excel_format(file_bytes)
+    
+    # Try the detected format first
+    if file_format == 'xlsx':
         try:
-            # Fallback to xlrd for .xls files
+            return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+        except Exception as e1:
+            # Maybe it's mislabeled, try xls
+            try:
+                return pd.read_excel(io.BytesIO(file_bytes), engine='xlrd')
+            except Exception as e2:
+                error_msg = f"""
+Could not read CIS Excel file. 
+
+**File Information:**
+- File size: {file_size:,} bytes
+- Detected format: {file_format}
+- Error with openpyxl (.xlsx): {str(e1)[:100]}
+- Error with xlrd (.xls): {str(e2)[:100]}
+
+**Please ensure:**
+1. File is a valid Excel file (.xlsx or .xls format)
+2. File is not corrupted (try opening in Excel/LibreOffice)
+3. File is not password protected
+4. File was uploaded completely
+
+**Common fixes:**
+- Re-save the file as .xlsx in Excel (File → Save As → Excel Workbook)
+- Remove any password protection
+- Try re-uploading the file
+"""
+                raise ValueError(error_msg)
+    
+    elif file_format == 'xls':
+        try:
             return pd.read_excel(io.BytesIO(file_bytes), engine='xlrd')
-        except:
-            # Last resort - let pandas auto-detect
-            raise ValueError(
-                f"Could not read Excel file. Please ensure:\n"
-                f"1. File is a valid Excel file (.xlsx or .xls)\n"
-                f"2. File is not corrupted\n"
-                f"3. File is not password protected\n"
-                f"Original error: {str(e)}"
-            )
+        except Exception as e1:
+            # Maybe it's mislabeled, try xlsx
+            try:
+                return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+            except Exception as e2:
+                error_msg = f"""
+Could not read CIS Excel file. 
+
+**File Information:**
+- File size: {file_size:,} bytes
+- Detected format: {file_format}
+- Error with xlrd (.xls): {str(e1)[:100]}
+- Error with openpyxl (.xlsx): {str(e2)[:100]}
+
+**Please ensure:**
+1. File is a valid Excel file (.xlsx or .xls format)
+2. File is not corrupted (try opening in Excel/LibreOffice)
+3. File is not password protected
+
+**Common fixes:**
+- Re-save the file as .xlsx in Excel (File → Save As → Excel Workbook)
+- Remove any password protection
+- Try re-uploading the file
+"""
+                raise ValueError(error_msg)
+    
+    else:
+        # Unknown format, try both
+        try:
+            return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+        except Exception as e1:
+            try:
+                return pd.read_excel(io.BytesIO(file_bytes), engine='xlrd')
+            except Exception as e2:
+                error_msg = f"""
+Could not read CIS Excel file. 
+
+**File Information:**
+- File size: {file_size:,} bytes
+- Detected format: UNKNOWN (not a valid Excel file)
+
+**This file does not appear to be a valid Excel file.**
+
+The file signature doesn't match .xlsx or .xls formats.
+
+**Please:**
+1. Verify this is actually an Excel file
+2. Open the file in Excel/LibreOffice to check it works
+3. Re-save as .xlsx (File → Save As → Excel Workbook)
+4. Try uploading again
+"""
+                raise ValueError(error_msg)
 
 # ==========================================
 # FILE VALIDATION
@@ -880,7 +971,7 @@ with tab1:
         
         if cis_file:
             try:
-                cis_bytes = cis_file.read()
+                cis_bytes = cis_file.getvalue()
                 df_cis = load_cis_file(cis_bytes)
                 st.success(f"✅ Loaded: {len(df_cis)} records, {len(df_cis.columns)} columns")
                 
@@ -917,7 +1008,7 @@ with tab1:
         
         if g2b_file:
             try:
-                g2b_bytes = g2b_file.read()
+                g2b_bytes = g2b_file.getvalue()
                 try:
                     xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
                 except:
@@ -966,9 +1057,17 @@ with tab1:
                 progress_bar.progress(percent / 100)
             
             try:
-                # Load files
-                cis_bytes = cis_file.read() if hasattr(cis_file, 'read') else cis_file.getvalue()
-                g2b_bytes = g2b_file.read() if hasattr(g2b_file, 'read') else g2b_file.getvalue()
+                # Load files using getvalue() which doesn't move file pointer
+                cis_bytes = cis_file.getvalue()
+                g2b_bytes = g2b_file.getvalue()
+                
+                # Verify we have actual data
+                if not cis_bytes or len(cis_bytes) == 0:
+                    st.error("❌ CIS file appears to be empty. Please re-upload the file.")
+                    st.stop()
+                if not g2b_bytes or len(g2b_bytes) == 0:
+                    st.error("❌ GSTR-2B file appears to be empty. Please re-upload the file.")
+                    st.stop()
                 
                 df_cis = load_cis_file(cis_bytes)
                 try:
