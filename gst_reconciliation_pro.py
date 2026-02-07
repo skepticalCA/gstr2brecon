@@ -173,10 +173,10 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
     file_obj = io.BytesIO(file_bytes)
     
     try:
-        df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None, nrows=8)
+        df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None, nrows=8, engine='openpyxl')
     except:
-        xl = pd.ExcelFile(file_obj)
-        df_raw = pd.read_excel(file_obj, sheet_name=xl.sheet_names[0], header=None, nrows=8)
+        xl = pd.ExcelFile(file_obj, engine='openpyxl')
+        df_raw = pd.read_excel(file_obj, sheet_name=xl.sheet_names[0], header=None, nrows=8, engine='openpyxl')
     
     idx_gstin = -1
     idx_inv = -1
@@ -218,9 +218,9 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
 
     file_obj.seek(0)
     try:
-        df_final = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_end_row + 1)
+        df_final = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_end_row + 1, engine='openpyxl')
     except:
-        df_final = pd.read_excel(file_obj, sheet_name=0, header=header_end_row + 1)
+        df_final = pd.read_excel(file_obj, sheet_name=0, header=header_end_row + 1, engine='openpyxl')
     
     current_cols = len(df_final.columns)
     if len(final_headers) >= current_cols:
@@ -233,7 +233,7 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
 @st.cache_data
 def load_cis_file(file_bytes):
     """Load and cache CIS file"""
-    return pd.read_excel(io.BytesIO(file_bytes))
+    return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
 
 # ==========================================
 # FILE VALIDATION
@@ -867,7 +867,7 @@ with tab1:
         if g2b_file:
             try:
                 g2b_bytes = g2b_file.read()
-                xl = pd.ExcelFile(io.BytesIO(g2b_bytes))
+                xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
                 sheet_name = 'B2B' if 'B2B' in xl.sheet_names else xl.sheet_names[0]
                 df_g2b = load_gstr2b_with_stitching(g2b_bytes, sheet_name)
                 st.success(f"✅ Loaded: {len(df_g2b)} records, {len(df_g2b.columns)} columns")
@@ -917,7 +917,7 @@ with tab1:
                 g2b_bytes = g2b_file.read() if hasattr(g2b_file, 'read') else g2b_file.getvalue()
                 
                 df_cis = load_cis_file(cis_bytes)
-                xl = pd.ExcelFile(io.BytesIO(g2b_bytes))
+                xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
                 sheet_name = 'B2B' if 'B2B' in xl.sheet_names else xl.sheet_names[0]
                 df_g2b = load_gstr2b_with_stitching(g2b_bytes, sheet_name)
                 
