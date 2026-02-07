@@ -168,15 +168,41 @@ def get_last_4(inv):
 def load_gstr2b_with_stitching(file_bytes, sheet_name):
     """
     Reads first 8 rows to find headers. Stitches split headers if found.
-    Cached for performance.
+    Cached for performance. Supports both xlsx and xls formats.
     """
     file_obj = io.BytesIO(file_bytes)
     
+    # Try to read with openpyxl first, then xlrd
     try:
         df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None, nrows=8, engine='openpyxl')
+        engine_to_use = 'openpyxl'
     except:
-        xl = pd.ExcelFile(file_obj, engine='openpyxl')
-        df_raw = pd.read_excel(file_obj, sheet_name=xl.sheet_names[0], header=None, nrows=8, engine='openpyxl')
+        try:
+            file_obj.seek(0)
+            df_raw = pd.read_excel(file_obj, sheet_name=sheet_name, header=None, nrows=8, engine='xlrd')
+            engine_to_use = 'xlrd'
+        except Exception as e:
+            # Get sheet names for fallback
+            file_obj.seek(0)
+            try:
+                xl = pd.ExcelFile(file_obj, engine='openpyxl')
+                engine_to_use = 'openpyxl'
+            except:
+                file_obj.seek(0)
+                try:
+                    xl = pd.ExcelFile(file_obj, engine='xlrd')
+                    engine_to_use = 'xlrd'
+                except:
+                    raise ValueError(
+                        f"Could not read GSTR-2B file. Please ensure:\n"
+                        f"1. File is a valid Excel file (.xlsx or .xls)\n"
+                        f"2. File is not corrupted\n"
+                        f"3. File is not password protected\n"
+                        f"Original error: {str(e)}"
+                    )
+            
+            file_obj.seek(0)
+            df_raw = pd.read_excel(file_obj, sheet_name=xl.sheet_names[0], header=None, nrows=8, engine=engine_to_use)
     
     idx_gstin = -1
     idx_inv = -1
@@ -218,9 +244,10 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
 
     file_obj.seek(0)
     try:
-        df_final = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_end_row + 1, engine='openpyxl')
+        df_final = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_end_row + 1, engine=engine_to_use)
     except:
-        df_final = pd.read_excel(file_obj, sheet_name=0, header=header_end_row + 1, engine='openpyxl')
+        file_obj.seek(0)
+        df_final = pd.read_excel(file_obj, sheet_name=0, header=header_end_row + 1, engine=engine_to_use)
     
     current_cols = len(df_final.columns)
     if len(final_headers) >= current_cols:
@@ -232,8 +259,23 @@ def load_gstr2b_with_stitching(file_bytes, sheet_name):
 
 @st.cache_data
 def load_cis_file(file_bytes):
-    """Load and cache CIS file"""
-    return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+    """Load and cache CIS file - supports both xlsx and xls formats"""
+    try:
+        # Try openpyxl for .xlsx files first
+        return pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+    except Exception as e:
+        try:
+            # Fallback to xlrd for .xls files
+            return pd.read_excel(io.BytesIO(file_bytes), engine='xlrd')
+        except:
+            # Last resort - let pandas auto-detect
+            raise ValueError(
+                f"Could not read Excel file. Please ensure:\n"
+                f"1. File is a valid Excel file (.xlsx or .xls)\n"
+                f"2. File is not corrupted\n"
+                f"3. File is not password protected\n"
+                f"Original error: {str(e)}"
+            )
 
 # ==========================================
 # FILE VALIDATION
@@ -258,6 +300,15 @@ def validate_file(df, file_type, required_columns):
         issues.append(f"❌ Missing columns in {file_type}: {', '.join(missing_cols)}")
     
     return issues
+
+def get_file_info(file_obj):
+    """Get file information for debugging"""
+    info = {
+        'name': file_obj.name if hasattr(file_obj, 'name') else 'Unknown',
+        'size': len(file_obj.getvalue()) if hasattr(file_obj, 'getvalue') else 0,
+        'type': file_obj.type if hasattr(file_obj, 'type') else 'Unknown'
+    }
+    return info
 
 # ==========================================
 # COLUMN MAPPING WITH SMART SUGGESTIONS
@@ -822,9 +873,9 @@ with tab1:
         st.markdown("#### 📄 CIS File")
         cis_file = st.file_uploader(
             "Upload your Credit Information Statement (CIS) Excel file",
-            type=['xlsx'],
+            type=['xlsx', 'xls'],
             key="cis",
-            help="Excel file from your accounting system"
+            help="Excel file from your accounting system (.xlsx or .xls format)"
         )
         
         if cis_file:
@@ -859,15 +910,18 @@ with tab1:
         st.markdown("#### 📊 GSTR-2B File")
         g2b_file = st.file_uploader(
             "Upload your GSTR-2B Excel file",
-            type=['xlsx'],
+            type=['xlsx', 'xls'],
             key="g2b",
-            help="Download from GST Portal"
+            help="Download from GST Portal (.xlsx or .xls format)"
         )
         
         if g2b_file:
             try:
                 g2b_bytes = g2b_file.read()
-                xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
+                try:
+                    xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
+                except:
+                    xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='xlrd')
                 sheet_name = 'B2B' if 'B2B' in xl.sheet_names else xl.sheet_names[0]
                 df_g2b = load_gstr2b_with_stitching(g2b_bytes, sheet_name)
                 st.success(f"✅ Loaded: {len(df_g2b)} records, {len(df_g2b.columns)} columns")
@@ -917,7 +971,10 @@ with tab1:
                 g2b_bytes = g2b_file.read() if hasattr(g2b_file, 'read') else g2b_file.getvalue()
                 
                 df_cis = load_cis_file(cis_bytes)
-                xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
+                try:
+                    xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='openpyxl')
+                except:
+                    xl = pd.ExcelFile(io.BytesIO(g2b_bytes), engine='xlrd')
                 sheet_name = 'B2B' if 'B2B' in xl.sheet_names else xl.sheet_names[0]
                 df_g2b = load_gstr2b_with_stitching(g2b_bytes, sheet_name)
                 
