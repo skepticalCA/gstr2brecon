@@ -740,8 +740,7 @@ def run_8_layer_reconciliation(cis_df, gstr2b_df, col_map_cis, col_map_g2b,
         g2b_unmatched = g2b_proc[g2b_proc['Matching Status'] == "Unmatched"]
         g2b_grouped = g2b_unmatched.groupby(['Norm_GSTIN', 'Inv_Basic']).agg({
             'Grand_Total': 'sum',
-            'INDEX': list,
-            'Inv_Basic': 'first'
+            'INDEX': list
         }).reset_index()
         
         for idx, row_cis in cis_grouped.iterrows():
