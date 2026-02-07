@@ -1161,13 +1161,59 @@ with tab1:
                 # Display results
                 st.subheader("Reconciled CIS Data")
                 
-                # Color-coded display
                 display_df = cis_res.copy()
-                st.dataframe(
-                    display_df.style.apply(highlight_status, axis=1),
-                    use_container_width=True,
-                    height=400
-                )
+                total_records = len(display_df)
+                total_cells = total_records * len(display_df.columns)
+                
+                # Show summary first
+                if total_records > 1000:
+                    st.warning(f"⚠️ Large dataset: {total_records:,} records detected. Use filters below to view specific records, or download the complete results.")
+                
+                # Add filter options for large datasets
+                if total_records > 1000:
+                    with st.expander("🔍 Filter Options (Optional)", expanded=False):
+                        col_f1, col_f2 = st.columns(2)
+                        with col_f1:
+                            status_filter = st.multiselect(
+                                "Filter by Status",
+                                options=['Matched', 'Unmatched'],
+                                default=['Matched', 'Unmatched']
+                            )
+                        with col_f2:
+                            show_limit = st.number_input(
+                                "Show first N records",
+                                min_value=100,
+                                max_value=total_records,
+                                value=min(1000, total_records),
+                                step=100,
+                                help="Limit display for better performance"
+                            )
+                        
+                        if status_filter:
+                            display_df = display_df[display_df['Matching Status'].isin(status_filter)]
+                        display_df = display_df.head(int(show_limit))
+                        
+                        st.info(f"📊 Showing {len(display_df):,} of {total_records:,} records (Full results available in download)")
+                
+                # Set pandas styling limit
+                pd.set_option("styler.render.max_elements", 1000000)
+                
+                # Apply styling conditionally based on dataset size
+                display_cells = len(display_df) * len(display_df.columns)
+                
+                if display_cells < 100000:  # Style smaller datasets
+                    st.dataframe(
+                        display_df.style.apply(highlight_status, axis=1),
+                        use_container_width=True,
+                        height=400
+                    )
+                else:  # For large datasets, show without styling
+                    st.info(f"ℹ️ Displaying {len(display_df):,} records without color coding for better performance")
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        height=400
+                    )
                 
                 # Download section
                 st.markdown("---")
